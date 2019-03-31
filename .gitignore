@@ -1,0 +1,17 @@
+data/*
+nlp_base/*
+.idea/*
+*.log
+jieba_git/*
+*.pyc
+*.txt
+*.txt*
+*.dat
+*.data
+*.pyc
+*.text
+*.text*
+*test
+*.csv
+*.bin
+*.h5
