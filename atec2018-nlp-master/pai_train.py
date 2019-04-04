@@ -30,8 +30,6 @@ from sklearn.linear_model import LogisticRegression, LogisticRegressionCV
 from sklearn.metrics import f1_score
 from sklearn.model_selection import train_test_split, KFold
 from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, GradientBoostingClassifier
-
-from gensim.models.word2vec import LineSentence
 from gensim.models.fasttext import FastText
 import copy
 
@@ -45,7 +43,7 @@ for word in new_words:
     jieba.add_word(word)
 
 star = re.compile("\*+")
-
+model_dir = ""
 test_size = 0.025
 random_state = 42
 fast_mode, fast_rate = False,0.01    # 快速调试，其评分不作为参考
@@ -581,8 +579,6 @@ def DSSM(pretrained_embedding, input_length, lstmsize=90):
 
     matchlist = Concatenate(axis=1)([Dense(32,activation = 'relu')(matchlist),Dense(48,activation = 'sigmoid')(matchlist)])
     res = Dense(1, activation = 'sigmoid')(matchlist)
-
-
     model = Model(inputs=[input1, input2, input1c, input2c], outputs=res)
     return model
     
@@ -597,7 +593,7 @@ def DSSM(pretrained_embedding, input_length, lstmsize=90):
 """
 class SWA(Callback):
     def __init__(self, model, swa_model, swa_start):
-        super().__init__()
+        super(SWA, self).__init__()
         self.model,self.swa_model,self.swa_start=model,swa_model,swa_start
         
     def on_train_begin(self, logs=None):
@@ -860,7 +856,7 @@ def result():
 
     df_output = pd.concat([df1["id"],pd.Series(result,name="label",dtype=np.int32)],axis=1)
     
-    topai(1,df_output)
+    # topai(1,df_output)
 
 
 
