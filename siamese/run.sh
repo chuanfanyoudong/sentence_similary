@@ -1,3 +1,3 @@
 #/bin/bash
 
-python main.py $1 $2
+python siamese_model.py $1 $2

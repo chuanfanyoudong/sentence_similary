@@ -88,7 +88,6 @@ class SiameseNetwork:
         datas = [sample_x, sample_y]
         writer = open("./model/word_dict.pkl", "rb")
         word_dict = pickle.load(writer)
-        # self.write_file(list(vocabs), self.vocab_path)
         return datas, word_dict
 
 

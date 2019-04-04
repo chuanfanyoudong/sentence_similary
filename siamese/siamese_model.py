@@ -22,6 +22,29 @@ from collections import Counter
 from sklearn.metrics import f1_score, precision_score, recall_score, accuracy_score
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+import numpy as np
+from keras.callbacks import Callback
+from sklearn.metrics import confusion_matrix, f1_score, precision_score, recall_score
+
+
+class Metrics(Callback):
+    def on_train_begin(self, logs={}):
+        self.val_f1s = []
+        self.val_recalls = []
+        self.val_precisions = []
+
+
+    def on_epoch_end(self, epoch, logs={}):
+        val_predict = np.asarray(self.model.predict([self.validation_data[0][0],self.validation_data[0][1]])).round()
+        val_targ = self.validation_data[1]
+        _val_f1 = f1_score(val_targ, val_predict)
+        _val_recall = recall_score(val_targ, val_predict)
+        _val_precision = precision_score(val_targ, val_predict)
+        self.val_f1s.append(_val_f1)
+        self.val_recalls.append(_val_recall)
+        self.val_precisions.append(_val_precision)
+        print "— val_f1: % f — val_precision: % f — val_recall % f" % (_val_f1, _val_precision, _val_recall)
+        return
 
 
 class LR_Updater(Callback):
@@ -79,19 +102,21 @@ class SiameseNetwork:
     def __init__(self):
         cur = '/'.join(os.path.abspath(__file__).split('/')[:-1])
         # self.train_path = os.path.join(cur, 'data/train_final.txt')
-        # self.train_path = os.path.join(cur, 'data/train')
-        self.train_path = os.path.join(cur, 'data/ant_all.text')
+        self.train_path = os.path.join(cur, 'data/train_final.txt')
+        self.val_path = os.path.join(cur, 'data/test_final.txt')
+        # self.train_path = os.path.join(cur, 'data/ant_all.text')
         self.vocab_path = os.path.join(cur, 'model/vocab.txt')
         self.embedding_file = os.path.join(cur, 'model/token_vec_300.bin')
         self.model_path = os.path.join(cur, 'model/tokenvec_bilstm2_siamese_model.h5')
-        self.datas, self.word_dict = self.build_data()
+        self.datas, self.word_dict = self.build_data(self.train_path)
+        self.val_datas = self.build_val_data(self.val_path)
         self.EMBEDDING_DIM = 300
-        self.EPOCHS = 500
+        self.EPOCHS = 200
         self.BATCH_SIZE = 256
         self.NUM_CLASSES = 2
         self.VOCAB_SIZE = len(self.word_dict)
         self.LIMIT_RATE = 0.95
-        self.TIME_STAMPS = self.select_best_length()
+        self.TIME_STAMPS = 24
         self.embedding_matrix = self.build_embedding_matrix()
 
     def process_lint(self, line):
@@ -106,16 +131,19 @@ class SiameseNetwork:
         line = u"借呗".join(line.strip().split(u"蚂蚁借呗"))
         return line
 
-    def select_best_length(self):
+    def select_best_length(self, path):
         len_list = []
         max_length = 0
         cover_rate = 0.0
-        for line in open(self.train_path):
+        for line in open(path):
             line = self.process_lint(line)
             line = line.strip().split('\t')
             if not line:
                 continue
-            sent = line[1]
+            if len(line) == 100:
+                sent = line[0]
+            else:
+                sent = line[1]
             # sent_len = len(sent)
             sent_len = len(sent)
             len_list.append(sent_len)
@@ -136,22 +164,56 @@ class SiameseNetwork:
         print('max_length:', max_length)
         return max_length
 
-
-    def build_data(self):
+    def build_val_data(self, path):
         sample_x = []
         sample_y = []
         sample_x_left = []
         sample_x_right = []
         vocabs = {'UNK'}
-        for line in open(self.train_path):
+        for line in open(path):
             line = self.process_lint(line)
             line = line.rstrip().split('\t')
             # line = line.rstrip().split('\t')
             if not line:
                 continue
-            sent_left = line[1]
-            sent_right = line[2]
-            label = line[3]
+            if len(line) == 100:
+                sent_left = line[0]
+                sent_right = line[1]
+                label = line[2]
+            else:
+                sent_left = line[1]
+                sent_right = line[2]
+                label = line[3]
+            sample_x_left.append([char for char in sent_left if char])
+            sample_x_right.append([char for char in sent_right if char])
+            sample_y.append(label)
+            for char in [char for char in sent_left + sent_right if char]:
+                vocabs.add(char)
+        print(len(sample_x_left), len(sample_x_right))
+        sample_x = [sample_x_left, sample_x_right]
+        datas = [sample_x, sample_y]
+        return datas
+
+    def build_data(self, path):
+        sample_x = []
+        sample_y = []
+        sample_x_left = []
+        sample_x_right = []
+        vocabs = {'UNK'}
+        for line in open(path):
+            line = self.process_lint(line)
+            line = line.rstrip().split('\t')
+            # line = line.rstrip().split('\t')
+            if not line:
+                continue
+            if len(line) == 100:
+                sent_left = line[0]
+                sent_right = line[1]
+                label = line[2]
+            else:
+                sent_left = line[1]
+                sent_right = line[2]
+                label = line[3]
             sample_x_left.append([char for char in sent_left if char])
             sample_x_right.append([char for char in sent_right if char])
             sample_y.append(label)
@@ -166,19 +228,75 @@ class SiameseNetwork:
         # self.write_file(list(vocabs), self.vocab_path)
         return datas, word_dict
 
+    def build_test_data(self, path):
+        sample_x = []
+        sample_y = []
+        sample_x_left = []
+        sample_x_right = []
+        vocabs = {'UNK'}
+        for line in open(path):
+            line = self.process_lint(line)
+            line = line.rstrip().split('\t')
+            # line = line.rstrip().split('\t')
+            if not line:
+                continue
+            sent_left = line[1]
+            sent_right = line[2]
+            sample_x_left.append([char for char in sent_left if char])
+            sample_x_right.append([char for char in sent_right if char])
+            for char in [char for char in sent_left + sent_right if char]:
+                vocabs.add(char)
+        print(len(sample_x_left), len(sample_x_right))
+        sample_x = [sample_x_left, sample_x_right]
+        datas = [sample_x, sample_y]
+        word_dict = {wd:index for index, wd in enumerate(list(vocabs))}
+        writer = open("./model/word_dict.pkl", "wb")
+        pickle.dump(word_dict, writer, protocol=2)
+        # self.write_file(list(vocabs), self.vocab_path)
+        return datas, word_dict
+
+    def modify_test_data(self):
+        sample_x = self.datas[0]
+        sample_y = self.datas[1]
+        sample_x_left = sample_x[0]
+        sample_x_right = sample_x[1]
+        left_x_train = [[self.word_dict[char] if char in self.word_dict else self.word_dict["UNK"] for char in data] for
+                        data in sample_x_left]
+        right_x_train = [[self.word_dict[char] if char in self.word_dict else self.word_dict["UNK"] for char in data]
+                         for data in sample_x_right]
+        left_x_train = pad_sequences(left_x_train, self.TIME_STAMPS)
+        right_x_train = pad_sequences(right_x_train, self.TIME_STAMPS)
+        return left_x_train, right_x_train
+
     def modify_data(self):
         sample_x = self.datas[0]
         sample_y = self.datas[1]
         sample_x_left = sample_x[0]
         sample_x_right = sample_x[1]
-        left_x_train = [[self.word_dict[char] for char in data] for data in sample_x_left]
-        right_x_train = [[self.word_dict[char] for char in data] for data in sample_x_right]
+        left_x_train = [[self.word_dict[char] if char in self.word_dict else self.word_dict["UNK"] for char in data] for
+                        data in sample_x_left]
+        right_x_train = [[self.word_dict[char] if char in self.word_dict else self.word_dict["UNK"] for char in data]
+                         for data in sample_x_right]
         y_train = [int(i) for i in sample_y]
         left_x_train = pad_sequences(left_x_train, self.TIME_STAMPS)
         right_x_train = pad_sequences(right_x_train, self.TIME_STAMPS)
         y_train = np.expand_dims(y_train, 2)
         return left_x_train, right_x_train, y_train
 
+    def modify_val_data(self):
+        sample_x = self.val_datas[0]
+        sample_y = self.val_datas[1]
+        sample_x_left = sample_x[0]
+        sample_x_right = sample_x[1]
+        left_x_train = [[self.word_dict[char] if char in self.word_dict else self.word_dict["UNK"] for char in data] for
+                        data in sample_x_left]
+        right_x_train = [[self.word_dict[char] if char in self.word_dict else self.word_dict["UNK"] for char in data]
+                         for data in sample_x_right]
+        y_train = [int(i) for i in sample_y]
+        left_x_train = pad_sequences(left_x_train, self.TIME_STAMPS)
+        right_x_train = pad_sequences(right_x_train, self.TIME_STAMPS)
+        y_train = np.expand_dims(y_train, 2)
+        return left_x_train, right_x_train, y_train
 
     def write_file(self, wordlist, filepath):
         with open(filepath, 'w') as f:
@@ -212,8 +330,6 @@ class SiameseNetwork:
             if embedding_vector is not None:
                 # print word
                 embedding_matrix[i] = embedding_vector
-            else:
-                print word
         return embedding_matrix
 
 
@@ -262,7 +378,7 @@ class SiameseNetwork:
                                     self.EMBEDDING_DIM,
                                     weights=[self.embedding_matrix],
                                     input_length=self.TIME_STAMPS,
-                                    trainable=False,
+                                    trainable=True,
                                     )
 
         left_input = Input(shape=(self.TIME_STAMPS,), dtype='float32')
@@ -382,8 +498,36 @@ class SiameseNetwork:
         recall = recall(y_true, y_pred)
         return 2 * ((precision * recall) / (precision + recall + K.epsilon()))
 
+    def f1_val(self, y_true, y_pred):
+        def recall(y_true, y_pred):
+            """Recall metric.
+            Only computes a batch-wise average of recall.
+            Computes the recall, a metric for multi-label classification of
+            how many relevant items are selected.
+            """
+            true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+            possible_positives = K.sum(K.round(K.clip(y_true, 0, 1)))
+            recall = true_positives / (possible_positives + K.epsilon())
+            return recall
+
+        def precision(y_true, y_pred):
+            """Precision metric.
+            Only computes a batch-wise average of precision.
+            Computes the precision, a metric for multi-label classification of
+            how many selected items are relevant.
+            """
+            true_positives = K.sum(K.round(K.clip(y_true * y_pred, 0, 1)))
+            predicted_positives = K.sum(K.round(K.clip(y_pred, 0, 1)))
+            precision = true_positives / (predicted_positives + K.epsilon())
+            return precision
+        precision = precision(y_true, y_pred)
+        recall = recall(y_true, y_pred)
+        return 2 * ((precision * recall) / (precision + recall + K.epsilon()))
+
     def train_model(self):
+        # self.TIME_STAMPS = self.select_best_length(self.train_path)
         left_x_train, right_x_train, y_train = self.modify_data()
+        left_x_val, right_x_val, y_val = self.modify_val_data()
         print(y_train)
         init_lrs = 0.001
         clr_div, cut_div = 10, 8
@@ -391,45 +535,67 @@ class SiameseNetwork:
         # cycle_len = 1
         # total_iterators = batch_num * cycle_len
         circular_lr = CircularLR(init_lrs, 60,  on_cycle_end=None, div=clr_div, cut_div=cut_div)
+        metrics = Metrics()
         callbacks = [circular_lr]
-
-
         model = self.bilstm_siamese_model()
         print "迭代次数"
         print self.EPOCHS
         history = model.fit(
+            class_weight={0: 1 / np.mean(y_train), 1: 1 / (1 - np.mean(y_train))},
                               x=[left_x_train, right_x_train],
                               y=y_train,
-                              validation_split=0.2,
+                              validation_data=([left_x_val, right_x_val], y_val),
                               batch_size=self.BATCH_SIZE,
                               epochs=self.EPOCHS,
-                               callbacks = callbacks
+                              callbacks = callbacks
                             )
         model.save(self.model_path)
 
+    def predict1(self, input_file, output_file):
+        self.datas = self.build_val_data(input_file)
+        writer = open("./model/word_dict.pkl", "rb")
+        self.word_dict = pickle.load(writer)
+        left_x_val, right_x_val, y_val = self.modify_val_data()
+        model = self.bilstm_siamese_model()
+        model.load_weights(self.model_path)
+        result = model.predict([left_x_val, right_x_val])
+        result = [1 if i[0] > 0.5 else 0 for i in result]
+        f1 = f1_score(y_val, result)
+        print f1
+        with open(input_file, 'r') as fin, open(output_file, 'w') as fout:
+            i = -1
+            for line in fin:
+                # line = self.process_lint(line)
+                i += 1
+                lineno = line.strip().split('\t')[0]
+                # print lineno
+                fout.write(lineno + '\t' + str(result[i]) + '\n')
 
-    # def predict(self):
-    #     left_x_train, right_x_train, y_train= self.modify_data()
-    #     # left_x_train, right_x_train, y_train = left_x_train[:100], right_x_train[:100], y_train[:100]
-    #     model = self.bilstm_siamese_model()
-    #     model.load_weights(self.model_path)
-    #     result = model.predict([left_x_test, right_x_test])
-    #     result = [1 if i[0] > 0.5 else 0 for i in result]
-    #     y_test = [i[0] for i in y_test]
-    #     f1 = f1_score(y_test, result, average='macro')
-    #     p = precision_score(y_test, result, average='macro')
-    #     r = recall_score(y_test, result, average='macro')
-    #     a = accuracy_score(y_test, result)
-    #     print a
-    #     print p
-    #     print r
-    #     print f1
-    #     return a, p, r, f1
-
-
-
+    def predict(self, input_file, output_file):
+        self.datas, _ = self.build_test_data(input_file)
+        writer = open("./model/word_dict.pkl", "rb")
+        self.word_dict = pickle.load(writer)
+        left_x_train, right_x_train= self.modify_test_data()
+        model = self.bilstm_siamese_model()
+        model.load_weights(self.model_path)
+        result = model.predict([left_x_train, right_x_train])
+        print result[:100]
+        result = [1 if i[0] > 0.5 else 0 for i in result]
+        with open(input_file, 'r') as fin, open(output_file, 'w') as fout:
+            i = -1
+            for line in fin:
+                # line = self.process_lint(line)
+                i += 1
+                lineno = line.strip().split('\t')[0]
+                # print lineno
+                fout.write(lineno + '\t' + str(result[i]) + '\n')
 
 handler = SiameseNetwork()
-handler.train_model()
-# handler.predict()
+# handler.train_model()
+# input_file, output_file = "data/test_final.txt", "data/re"
+input_file, output_file = sys.argv[1], sys.argv[2]
+# handler.TIME_STAMPS = handler.select_best_length(input_file)
+handler.predict(input_file, output_file)
+
+
 
